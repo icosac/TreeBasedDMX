@@ -28,12 +28,12 @@ public class TBDMXNode extends AbstractActor {
   private Queue<ActorRef> requestQueue = new LinkedList<>();   
   private Random rnd = new Random();
 
-  private float time;
+  private long time;
   
   /*-- Actor constructors --------------------------------------------------- */
   public TBDMXNode(int id) {
     this.id = id;
-    System.out.println("Node "+id+" up.")
+    System.out.println("Node "+id+" up.");
   }
 
   static public Props props(int id) {
@@ -42,26 +42,39 @@ public class TBDMXNode extends AbstractActor {
 
   /*-- Auxiliary functions--------------------------------------------------- */
 
+  private void criticalSection(){
+    this.using = true;
+    System.out.println("Entering CS @ node "+this.id);
+    try { Thread.sleep(this.time); } 
+    catch (InterruptedException e) { e.printStackTrace(); }
+    System.out.println("Exiting CS @ node "+this.id);
+    this.using = false;
+  }
+
   private void addToRequestQueue(ActorRef node) {
-    while (!requestQueue.offer(node)); //assures to push on queue without exceptions
+    while (!this.requestQueue.offer(node)); //assures to push on queue without exceptions
+    System.out.println("Node "+this.id+": Queue is now "+this.requestQueue);
   }
 
   private void serveQueue() {
-    if !(this.requestQueue.isEmpty()){
-      TBDMXNode head = this.requestQueue.remove();
+    if (!this.requestQueue.isEmpty()){
+      ActorRef head = this.requestQueue.remove();
+      System.out.println("Node "+this.id+": serving "+head+". Queue is now "+this.requestQueue);
       if (head==getSelf()){
         criticalSection();
       }
       else {
         head.tell(new Privilege(),getSelf());
+        this.holder = false;
+        this.holderNode = head;
         if (!this.requestQueue.isEmpty()) {
           head.tell(new Request(),getSelf());
-          asked = True;
+          asked = true;
         }
       }
     } 
     else {
-      System.err.println("ERROR in serveQueue: trying to serve an empty queue")
+      System.err.println("ERROR in serveQueue (node "+this.id+"): trying to serve an empty queue");
     }
   }
 
@@ -72,11 +85,11 @@ public class TBDMXNode extends AbstractActor {
     public final List<ActorRef> group;
     public SetNeighbors(List<ActorRef> group) {
       this.group = Collections.unmodifiableList(new ArrayList<ActorRef>(group));
-
+    }
   }
   public static class RequestCS implements Serializable {
-    public final float time;
-    public requestCS(float time){
+    public final long time;
+    public RequestCS(long time){
       this.time = time;
     }
   }
@@ -85,11 +98,11 @@ public class TBDMXNode extends AbstractActor {
   public static class Request implements Serializable {}
   public static class Privilege implements Serializable {}
   public static class Restart implements Serializable {}
-  public static class Advise implements Serializable {
+  public static class Advice implements Serializable {
     public final boolean holder; //"to me, you're the holder"
     public final boolean asked; //"I have asked the token"
     public final int requestCounter;
-    public Advide(boolean holder, boolean asked, int requestCounter){
+    public Advice(boolean holder, boolean asked, int requestCounter){
       this.holder = holder;
       this.asked = asked;
       this.requestCounter = requestCounter;
@@ -97,10 +110,11 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onImposeHolder(ImposeHolder msg) {
-    this.holder = True;
+    this.holder = true;
     for (ActorRef node : neighbors) {
       if (node != getSender()) {
         node.tell(new BroadcastHolder(),getSelf());
+        System.out.println(this.id+": IS HOLDER. Sending BroadcastHolder from "+ getSelf()+" to "+node);
       }
     }
   }
@@ -110,17 +124,17 @@ public class TBDMXNode extends AbstractActor {
   }
 
   private void onRequestCS(RequestCS msg) {
+    System.out.print("Node "+this.id+"("+this.holder+"): requesting CS");
     this.time = msg.time;
     if (!this.requestQueue.isEmpty()) {
       addToRequestQueue(getSelf());
     } 
     else if (!this.holder && this.requestQueue.isEmpty()) {
       addToRequestQueue(getSelf());
-      holderNode.tell(new Request(),getSelf());
-      asked = True;
+      this.holderNode.tell(new Request(),getSelf());
+      this.asked = true;
     }
     else if (this.holder && this.requestQueue.isEmpty()) {
-      this.using = True;
       criticalSection();
       if (!this.requestQueue.isEmpty()) {
         serveQueue();          
@@ -133,36 +147,38 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onBroadcastHolder(BroadcastHolder msg) {
-    this.holder = False;
+    this.holder = false;
     this.holderNode = getSender();
-    
+    System.out.println("Node "+ this.id +": holdernode is "+this.holderNode);
     for (ActorRef node : this.neighbors) {
       if (node != getSender()) {
         node.tell(new BroadcastHolder(),getSelf());
+        System.out.println(this.id+": sending BroadcastHolder from "+ getSelf()+" to "+node);
       }
     }  
   }
   
   private void onRequest(Request msg) {
-    addToRequestQueue(msg.getSender());
-    if (!this.using and !this.asked){
+    System.out.println("Node "+this.id+"("+this.using+","+this.asked+"): received request from "+getSender());
+    addToRequestQueue(getSender());
+    if (!this.using && !this.asked){
       if (this.holder){
-        getSender().tell(new Privilege(),getSelf());
-        this.requestQueue.pop();
-        this.holder = False;
-        this.asked = False;
+        serveQueue();
+        this.holder = false;
+        this.asked = false;
         this.holderNode = getSender();
       } 
       else if (this.requestQueue.size()==1) { //not the holder, single element
-        this.asked = True;
-        holderNode.tell(new Privilege(),getSelf());
+        this.asked = true;
+        holderNode.tell(new Request(),getSelf());
       }
     }
   }
   
   private void onPrivilege(Privilege msg) {
-    this.holder = True;
-    this.asked = False;
+    System.out.println("Node "+this.id+": access granted by "+getSender());
+    this.holder = true;
+    this.asked = false;
     serveQueue();
   }
   
@@ -170,7 +186,7 @@ public class TBDMXNode extends AbstractActor {
 
   }
   
-  private void onAdvise(Advise msg) {
+  private void onAdvice(Advice msg) {
 
   }
 
@@ -186,7 +202,7 @@ public class TBDMXNode extends AbstractActor {
       .match(Request.class,  this::onRequest)
       .match(Privilege.class,  this::onPrivilege)
       .match(Restart.class,  this::onRestart)
-      .match(Advise.class,  this::onAdvise)
+      .match(Advice.class,  this::onAdvice)
       .build();
   }
 }
