@@ -81,7 +81,7 @@ public class TBDMXNode extends AbstractActor {
       log("Node "+this.id+": serving "+head+". Queue is now "+this.requestQueue);
       if (head==getSelf()){
         criticalSection();
-        if (!this.requestQueue.isEmpty()) {
+        if (!this.requestQueue.isEmpty()) { 
           serveQueue();
         }    
       }
@@ -117,6 +117,8 @@ public class TBDMXNode extends AbstractActor {
   }
   
   public static class SaveLog implements Serializable {}
+  public static class Crash implements Serializable {}
+  public static class Recovery implements Serializable {}
   public static class BroadcastHolder implements Serializable {}
   public static class Request implements Serializable {}
   public static class Privilege implements Serializable {}
@@ -213,6 +215,14 @@ public class TBDMXNode extends AbstractActor {
 
   }
 
+  private void onCrash(Crash msg) {
+
+  }
+
+  private void onRecovery(Recovery msg) {
+
+  }
+
   private void onSaveLog(SaveLog msg){
     try {
       this.logger.close();
@@ -229,6 +239,8 @@ public class TBDMXNode extends AbstractActor {
   public Receive createReceive() {
     return receiveBuilder()
       .match(SaveLog.class,  this::onSaveLog)
+      .match(Crash.class,  this::onCrash)
+      .match(Recovery.class,  this::onRecovery)
       .match(ImposeHolder.class,  this::onImposeHolder)
       .match(SetNeighbors.class,  this::onSetNeighbors)
       .match(RequestCS.class,  this::onRequestCS)
