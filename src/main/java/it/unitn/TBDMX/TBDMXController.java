@@ -9,7 +9,9 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.io.IOException;
-import org.json.*;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileNotFoundException;
 
 import it.unitn.TBDMX.TBDMXNode.ImposeHolder;
 import it.unitn.TBDMX.TBDMXNode.RequestCS;
@@ -19,9 +21,10 @@ import it.unitn.TBDMX.TBDMXNode.Restart;
 import it.unitn.TBDMX.TBDMXNode.Privilege;
 import it.unitn.TBDMX.TBDMXNode.Request;
 import it.unitn.TBDMX.TBDMXNode.BroadcastHolder;
+import it.unitn.TBDMX.TBDMXNode.SaveLog;
 
 public class TBDMXController {
-  final static int N_nodes = 5;
+  final static int N_nodes =6 ;
 
   public static void main(String[] args) {
     // Create the actor system
@@ -34,12 +37,25 @@ public class TBDMXController {
     }
 
     List<ArrayList<ActorRef>> neighbors = new ArrayList<>();
-    neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(1))));
+    BufferedReader br = null;
+    try { br = new BufferedReader(new FileReader("tree.conf")); }
+    catch (FileNotFoundException e) {System.err.println("Tree file not found!"); System.exit(-2);}
+    String st;
+    try {
+      while ((st = br.readLine()) != null) {
+        ArrayList<ActorRef> nodeNeighbors = new ArrayList<>();
+        for (String nId : st.split(" ",0)) {
+          nodeNeighbors.add(group.get(Integer.parseInt(nId)));
+        }
+        neighbors.add(nodeNeighbors);
+      }
+    } catch(IOException e) {System.err.println("Error reading tree file!"); System.exit(-2);}
+    /*neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(1))));
     neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(0),group.get(2))));
     neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(1),group.get(3))));
     neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(2),group.get(4))));
     neighbors.add(new ArrayList<ActorRef>(Arrays.asList(group.get(3))));
-
+    */
 
     // Send neighbors message
     for (int i=0; i<N_nodes; i++){
@@ -53,18 +69,16 @@ public class TBDMXController {
     catch (InterruptedException e) { e.printStackTrace(); }
 
     group.get(0).tell(new RequestCS(2042), null);
-    try { Thread.sleep(100); } 
-    catch (InterruptedException e) { e.printStackTrace(); }
     group.get(1).tell(new RequestCS(2042), null);
-    try { Thread.sleep(100); } 
-    catch (InterruptedException e) { e.printStackTrace(); }
     group.get(3).tell(new RequestCS(2042), null);
-    try { Thread.sleep(100); } 
-    catch (InterruptedException e) { e.printStackTrace(); }
     group.get(0).tell(new RequestCS(2042), null);
+    group.get(5).tell(new RequestCS(2042), null);
 
     try {
       System.in.read();
+      for (int i=0; i<N_nodes; i++){
+        group.get(i).tell(new SaveLog(), null);
+      }
     } 
     catch (IOException ioe) {}
     system.terminate();

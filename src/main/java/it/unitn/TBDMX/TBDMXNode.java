@@ -16,7 +16,9 @@ import java.util.ArrayList;
 import java.lang.Thread;
 import java.lang.InterruptedException;
 import java.util.Collections;
-
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 
 public class TBDMXNode extends AbstractActor {
   private int id; // node ID
@@ -27,13 +29,20 @@ public class TBDMXNode extends AbstractActor {
   private List<ActorRef> neighbors = new ArrayList<>();
   private Queue<ActorRef> requestQueue = new LinkedList<>();   
   private Random rnd = new Random();
+  private BufferedWriter logger;
 
   private long time;
   
   /*-- Actor constructors --------------------------------------------------- */
   public TBDMXNode(int id) {
     this.id = id;
-    System.out.println("Node "+id+" up.");
+    try {
+      this.logger = new BufferedWriter(new FileWriter("logs/node"+id+".log"));
+    }
+    catch (IOException e){
+      System.err.println("Node "+this.id+": cannot initialize log!");
+    }
+    log("Node "+id+" up.");
   }
 
   static public Props props(int id) {
@@ -42,26 +51,39 @@ public class TBDMXNode extends AbstractActor {
 
   /*-- Auxiliary functions--------------------------------------------------- */
 
+  private void log(String s){
+    try {
+      this.logger.write(s+"\n");
+    } 
+    catch (IOException e) {
+      System.err.println("Node "+this.id+": logging error");
+    }
+    System.out.println(s);
+  }
+
   private void criticalSection(){
     this.using = true;
-    System.out.println("Entering CS @ node "+this.id);
+    log("Entering CS @ node "+this.id);
     try { Thread.sleep(this.time); } 
     catch (InterruptedException e) { e.printStackTrace(); }
-    System.out.println("Exiting CS @ node "+this.id);
+    log("Exiting CS @ node "+this.id);
     this.using = false;
   }
 
   private void addToRequestQueue(ActorRef node) {
     while (!this.requestQueue.offer(node)); //assures to push on queue without exceptions
-    System.out.println("Node "+this.id+": Queue is now "+this.requestQueue);
+    log("Node "+this.id+": Queue is now "+this.requestQueue);
   }
 
   private void serveQueue() {
     if (!this.requestQueue.isEmpty()){
       ActorRef head = this.requestQueue.remove();
-      System.out.println("Node "+this.id+": serving "+head+". Queue is now "+this.requestQueue);
+      log("Node "+this.id+": serving "+head+". Queue is now "+this.requestQueue);
       if (head==getSelf()){
         criticalSection();
+        if (!this.requestQueue.isEmpty()) {
+          serveQueue();
+        }    
       }
       else {
         head.tell(new Privilege(),getSelf());
@@ -94,6 +116,7 @@ public class TBDMXNode extends AbstractActor {
     }
   }
   
+  public static class SaveLog implements Serializable {}
   public static class BroadcastHolder implements Serializable {}
   public static class Request implements Serializable {}
   public static class Privilege implements Serializable {}
@@ -114,7 +137,7 @@ public class TBDMXNode extends AbstractActor {
     for (ActorRef node : neighbors) {
       if (node != getSender()) {
         node.tell(new BroadcastHolder(),getSelf());
-        System.out.println(this.id+": IS HOLDER. Sending BroadcastHolder from "+ getSelf()+" to "+node);
+        log(this.id+": IS HOLDER. Sending BroadcastHolder from "+ getSelf()+" to "+node);
       }
     }
   }
@@ -124,7 +147,7 @@ public class TBDMXNode extends AbstractActor {
   }
 
   private void onRequestCS(RequestCS msg) {
-    System.out.print("Node "+this.id+"("+this.holder+"): requesting CS");
+    log("Node "+this.id+"("+this.holder+"): requesting CS");
     this.time = msg.time;
     if (!this.requestQueue.isEmpty()) {
       addToRequestQueue(getSelf());
@@ -149,17 +172,17 @@ public class TBDMXNode extends AbstractActor {
   private void onBroadcastHolder(BroadcastHolder msg) {
     this.holder = false;
     this.holderNode = getSender();
-    System.out.println("Node "+ this.id +": holdernode is "+this.holderNode);
+    log("Node "+ this.id +": holdernode is "+this.holderNode);
     for (ActorRef node : this.neighbors) {
       if (node != getSender()) {
         node.tell(new BroadcastHolder(),getSelf());
-        System.out.println(this.id+": sending BroadcastHolder from "+ getSelf()+" to "+node);
+        log(this.id+": sending BroadcastHolder from "+ getSelf()+" to "+node);
       }
     }  
   }
   
   private void onRequest(Request msg) {
-    System.out.println("Node "+this.id+"("+this.using+","+this.asked+"): received request from "+getSender());
+    log("Node "+this.id+"("+this.using+","+this.asked+"): received request from "+getSender());
     addToRequestQueue(getSender());
     if (!this.using && !this.asked){
       if (this.holder){
@@ -176,7 +199,7 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onPrivilege(Privilege msg) {
-    System.out.println("Node "+this.id+": access granted by "+getSender());
+    log("Node "+this.id+": access granted by "+getSender());
     this.holder = true;
     this.asked = false;
     serveQueue();
@@ -190,11 +213,22 @@ public class TBDMXNode extends AbstractActor {
 
   }
 
+  private void onSaveLog(SaveLog msg){
+    try {
+      this.logger.close();
+      System.out.println("Node "+this.id+": log saved successfully.");
+    }
+    catch (IOException e) {
+      System.err.println("Error closing log file.");
+    }
+  }
+
   // Here we define the mapping between the received message types
   // and our actor methods
   @Override
   public Receive createReceive() {
     return receiveBuilder()
+      .match(SaveLog.class,  this::onSaveLog)
       .match(ImposeHolder.class,  this::onImposeHolder)
       .match(SetNeighbors.class,  this::onSetNeighbors)
       .match(RequestCS.class,  this::onRequestCS)
