@@ -23,11 +23,17 @@ import java.io.IOException;
 public class TBDMXNode extends AbstractActor {
   private int id; // node ID
   private boolean holder;
+  private boolean recoveryHolder;
+  private boolean crashed;
+  private boolean recovering;
   private boolean asked;
   private boolean using;
+  private int adviceCounter;
+  private List<Advice> receivedAdvices = new ArrayList<>();
   private ActorRef holderNode;
   private List<ActorRef> neighbors = new ArrayList<>();
   private Queue<ActorRef> requestQueue = new LinkedList<>();   
+  private Queue<ActorRef> recoveryQueue = new LinkedList<>();   
   private Random rnd = new Random();
   private BufferedWriter logger;
 
@@ -89,6 +95,7 @@ public class TBDMXNode extends AbstractActor {
         head.tell(new Privilege(),getSelf());
         this.holder = false;
         this.holderNode = head;
+        //piggybacking token request back 
         if (!this.requestQueue.isEmpty()) {
           head.tell(new Request(),getSelf());
           asked = true;
@@ -124,13 +131,17 @@ public class TBDMXNode extends AbstractActor {
   public static class Privilege implements Serializable {}
   public static class Restart implements Serializable {}
   public static class Advice implements Serializable {
+    public final ActorRef sender;
     public final boolean holder; //"to me, you're the holder"
     public final boolean asked; //"I have asked the token"
-    public final int requestCounter;
-    public Advice(boolean holder, boolean asked, int requestCounter){
+    public final int adviceCounter;
+    public final boolean inRequestQueue;
+    public Advice(ActorRef sender, boolean holder, boolean asked, boolean inRequestQueue, int adviceCounter){
+      this.sender = sender;
       this.holder = holder;
       this.asked = asked;
-      this.requestCounter = requestCounter;
+      this.inRequestQueue = inRequestQueue;
+      this.adviceCounter = adviceCounter;
     }
   }
   
@@ -151,30 +162,37 @@ public class TBDMXNode extends AbstractActor {
   private void onRequestCS(RequestCS msg) {
     log("Node "+this.id+"("+this.holder+"): requesting CS");
     this.time = msg.time;
-    if (!this.requestQueue.isEmpty()) {
-      addToRequestQueue(getSelf());
-    } 
-    else if (!this.holder && this.requestQueue.isEmpty()) {
-      addToRequestQueue(getSelf());
-      this.holderNode.tell(new Request(),getSelf());
-      this.asked = true;
-    }
-    else if (this.holder && this.requestQueue.isEmpty()) {
-      criticalSection();
+    if (!this.crashed && !this.recovering){
       if (!this.requestQueue.isEmpty()) {
-        serveQueue();          
+        addToRequestQueue(getSelf());
+      } 
+      else if (!this.holder && this.requestQueue.isEmpty()) {
+        addToRequestQueue(getSelf());
+        this.holderNode.tell(new Request(),getSelf());
+        this.asked = true;
       }
-    }  
-    else {
-      System.err.println("ERROR in RequestCS: impossible node state");
-      System.exit(-1);
+      else if (this.holder && this.requestQueue.isEmpty()) {
+        criticalSection();
+        if (!this.requestQueue.isEmpty()) {
+          serveQueue();          
+        }
+      }  
+      else {
+        System.err.println("ERROR in RequestCS: impossible node state");
+        System.exit(-1);
+      }
+    }
+    else if (this.recovering){
+      log("Node "+this.id+": recovery requestCS enqueued");
+      while (!this.recoveryQueue.offer(getSelf())); //assures to push on queue without exceptions
+      log("Node "+this.id+": recoveryQueue is now "+this.recoveryQueue);     
     }
   }
   
   private void onBroadcastHolder(BroadcastHolder msg) {
     this.holder = false;
     this.holderNode = getSender();
-    log("Node "+ this.id +": holdernode is "+this.holderNode);
+    log("Node "+ this.id +": holderNode is "+this.holderNode);
     for (ActorRef node : this.neighbors) {
       if (node != getSender()) {
         node.tell(new BroadcastHolder(),getSelf());
@@ -185,42 +203,123 @@ public class TBDMXNode extends AbstractActor {
   
   private void onRequest(Request msg) {
     log("Node "+this.id+"("+this.using+","+this.asked+"): received request from "+getSender());
-    addToRequestQueue(getSender());
-    if (!this.using && !this.asked){
-      if (this.holder){
-        serveQueue();
-        this.holder = false;
-        this.asked = false;
-        this.holderNode = getSender();
-      } 
-      else if (this.requestQueue.size()==1) { //not the holder, single element
-        this.asked = true;
-        holderNode.tell(new Request(),getSelf());
+    if (!this.crashed && !this.recovering){
+      addToRequestQueue(getSender());
+      if (!this.using && !this.asked){
+        if (this.holder){
+          serveQueue();
+          this.asked = false;
+        } 
+        else if (this.requestQueue.size()==1) { //not the holder, single element
+          this.asked = true;
+          this.holderNode.tell(new Request(),getSelf());
+        }
       }
+    } 
+    else if (this.recovering){
+      log("Node "+this.id+": recovery request enqueued");
+      while (!this.recoveryQueue.offer(getSender())); //assures to push on queue without exceptions
+      log("Node "+this.id+": recoveryQueue is now "+this.recoveryQueue);
     }
   }
   
   private void onPrivilege(Privilege msg) {
-    log("Node "+this.id+": access granted by "+getSender());
-    this.holder = true;
-    this.asked = false;
-    serveQueue();
+    if (!this.crashed){
+      this.adviceCounter = 0;
+      log("Node "+this.id+": access granted by "+getSender());
+      this.holder = true;
+      this.asked = false;
+      serveQueue();
+    }
+    else {
+      this.recoveryHolder = true;
+    }
   }
   
   private void onRestart(Restart msg) {
-
+    this.adviceCounter++;
+    getSender().tell(
+      new Advice(
+        getSelf(),
+        this.holderNode==getSender(),
+        this.asked,
+        this.requestQueue.contains(getSender()),
+        this.adviceCounter
+      ),
+      getSelf()
+    );
   }
   
   private void onAdvice(Advice msg) {
+    log("Node "+this.id+" received advice from node: "+getSender());
+    this.receivedAdvices.add(msg);
+    if (receivedAdvices.size() == this.neighbors.size()) {
+      this.receivedAdvices.sort((Advice a1,Advice a2)->a1.adviceCounter-a2.adviceCounter);
+      for (Advice ad : receivedAdvices) {
+        System.out.println("Advice: "+ad.sender);
+        if (ad.asked) {
+          requestQueue.add(ad.sender);
+        }
 
+        this.holder &= ad.holder;
+        if (!ad.holder) {
+          log("Holder found again!");
+          this.holderNode = ad.sender;
+          this.asked = ad.inRequestQueue;
+        }
+      }
+      this.receivedAdvices.clear();
+      
+      if (this.recoveryHolder) {
+        this.adviceCounter = 0;
+        log("Node "+this.id+": (recovery) access granted ");
+        this.holder = true;
+        this.asked = false;
+      }
+      while (!this.recoveryQueue.isEmpty()){
+        this.requestQueue.add(this.recoveryQueue.remove());
+      }
+      
+      if (this.holder){
+        if (!this.requestQueue.isEmpty()){
+          serveQueue();
+          this.asked = false;
+        }
+      } 
+      else if (!this.asked) {
+        this.asked = true;
+        this.holderNode.tell(new Request(),getSelf());
+      }
+      this.recovering = false;
+    }
   }
 
   private void onCrash(Crash msg) {
-
+    log("Node "+this.id+" crashed.");
+    if (!this.crashed){
+      this.crashed = true;
+      this.requestQueue.clear();
+      this.holder = true;
+      this.asked = false;
+      this.holderNode = null;
+    }
+    else {
+      log("Node "+this.id+": node is already down!");
+    }
   }
 
   private void onRecovery(Recovery msg) {
-
+    log("Node "+this.id+" recovering.");
+    if (this.crashed){
+      for (ActorRef node : neighbors) {
+        node.tell(new Restart(), this.getSelf());
+      }
+      this.crashed = false;
+      this.recovering = true;
+    } 
+    else {
+      log("Node "+this.id+": node is up and runnning, nothing to recover!");
+    }
   }
 
   private void onSaveLog(SaveLog msg){

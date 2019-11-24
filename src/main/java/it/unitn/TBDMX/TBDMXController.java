@@ -84,7 +84,7 @@ public class TBDMXController {
         }
         else {
           ArrayList<String> command = new ArrayList<> (Arrays.asList(st.split(" ",0)));
-          System.out.println(command);
+          System.out.println("$ "+st);
           if (command.get(0).equals("request")) {
             group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);            
           }
