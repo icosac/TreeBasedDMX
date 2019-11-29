@@ -54,14 +54,13 @@ public class TBDMXController {
           }
         }
       } else {
-        while ((st = br.readLine()) != null) {
+        do {
           ArrayList<Integer> nodeNeighborsIds = new ArrayList<>();
           for (String nId : st.split(" ", 0)) {
             nodeNeighborsIds.add(Integer.parseInt(nId));
           }
           neighbors.add(nodeNeighborsIds);
-        }
-
+        } while ((st = br.readLine()) != null);
       }
     }
     catch(IOException e) {System.err.println("Error reading tree file!"); System.exit(-2);}
