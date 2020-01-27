@@ -77,8 +77,14 @@ public class TBDMXNode extends AbstractActor {
   }
 
   private void addToRequestQueue(ActorRef node) {
-    while (!this.requestQueue.offer(node)); //assures to push on queue without exceptions
-    log("Node "+this.id+": Queue is now "+this.requestQueue);
+    if (!this.requestQueue.contains(node)){
+      while (!this.requestQueue.offer(node)); //assures to push on queue without exceptions
+      log("Node "+this.id+": Queue is now "+this.requestQueue);
+    }
+    else {
+      log("Node "+this.id+" is already in queue"+this.requestQueue);
+    }
+
   }
 
   private void serveQueue() {
@@ -230,6 +236,7 @@ public class TBDMXNode extends AbstractActor {
     if (!this.crashed){
       this.adviceCounter = 0;
       log("Node "+this.id+": access granted by "+getSender());
+      this.holderNode = getSelf();
       this.holder = true;
       this.asked = false;
       serveQueue();
@@ -260,7 +267,7 @@ public class TBDMXNode extends AbstractActor {
       this.receivedAdvices.sort((Advice a1,Advice a2)->a1.adviceCounter-a2.adviceCounter);  //Sort all messages for the adviceCounter in order not to starve any node.
       for (Advice ad : receivedAdvices) {                                                   //For all the messages in the list
         System.out.println("Advice: "+ad.sender);
-        if (ad.asked) {                                                                     //If it requsted me the token, then I add it to the queue.
+        if (ad.asked && ad.holder) {                                                                     //If it requsted me the token, then I add it to the queue.
           requestQueue.add(ad.sender);
         }
 
@@ -281,27 +288,30 @@ public class TBDMXNode extends AbstractActor {
         this.asked = false;
       }
       while (!this.recoveryQueue.isEmpty()){                                                //If a received Request messages while I was recovering, then I add them at the end of the queue I created before hand
-        this.requestQueue.add(this.recoveryQueue.remove());
+        ActorRef recoveredNode=this.recoveryQueue.remove();
+        if (!this.requestQueue.contains(recoveredNode)) {
+          this.requestQueue.add(recoveredNode);
+        }
       }
       
-      if (this.holder){                                                                     //Finally, if I'm the holder, then I can serve the queue if it is not empty
+      if (this.holder){                                                                    //Finally, if I'm the holder, then I can serve the queue if it is not empty
         if (!this.requestQueue.isEmpty()){
           serveQueue();
           this.asked = false;
         }
       } 
-      else if (!this.asked && !this.requestQueue.isEmpty()) {                                                               //Else I can send a Request message to my holderNode.
+      else if (!this.asked && !this.requestQueue.isEmpty()) {                              //Else I can send a Request message to my holderNode.
         this.asked = true;
         this.holderNode.tell(new Request(),getSelf());
       }
       this.recovering = false;
+      log("After crashing "+String.valueOf(this.requestQueue));
     }
-    log("After crashing "+String.valueOf(this.requestQueue));
   }
 
   private void onCrash(Crash msg) {
     log("Node "+this.id+" crashed.");
-    if (!this.crashed){                                                     //If I receive the crashed command, and my status is not crashed, then
+    if (!this.crashed && !this.recovering){                                 //If I receive the crashed command, and my status is not crashed, then
       log("Before crashing "+String.valueOf(this.requestQueue));
       this.crashed = true;                                                  //Set my status to crashed
       this.requestQueue.clear();                                            //Clear the queue of requests
@@ -310,7 +320,7 @@ public class TBDMXNode extends AbstractActor {
       this.holderNode = null;                                               //There is no holder since I assume it's me.
     }
     else {
-      log("Node "+this.id+": node is already down!");
+      log("Node "+this.id+": node is already down or recovering!");
     }
   }
 
