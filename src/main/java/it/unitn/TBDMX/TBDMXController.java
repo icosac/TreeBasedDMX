@@ -1,10 +1,12 @@
 package it.unitn.TBDMX;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
+import scala.Array;
 import scala.concurrent.duration.Duration;
 
 import java.io.*;
 import java.lang.Thread;
+import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.ArrayList;
@@ -48,8 +50,8 @@ public class TBDMXController {
           } else {
             m = pattEdge.matcher(st);
             if (m.find()) {
-              neighbors.get(Integer.parseInt(m.group(1)) - 1).add(Integer.parseInt(m.group(2)) - 1);
-              neighbors.get(Integer.parseInt(m.group(2)) - 1).add(Integer.parseInt(m.group(1)) - 1);
+              neighbors.get(Integer.parseInt(m.group(1))).add(Integer.parseInt(m.group(2)));
+              neighbors.get(Integer.parseInt(m.group(2))).add(Integer.parseInt(m.group(1)));
             }
           }
         }
@@ -110,9 +112,9 @@ public class TBDMXController {
         }
         else {
           ArrayList<String> command = new ArrayList<> (Arrays.asList(st.split(" ",0)));
-          System.out.println("$ "+st);
+//          System.out.println("$ "+st);
           if (command.get(0).equals("request")) {
-            group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);            
+            group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);
           }
           else if (command.get(0).equals("crash")) {
             group.get(Integer.parseInt(command.get(1))).tell(new Crash(), null);

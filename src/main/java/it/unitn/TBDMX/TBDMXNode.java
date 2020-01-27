@@ -143,6 +143,9 @@ public class TBDMXNode extends AbstractActor {
       this.inRequestQueue = inRequestQueue;
       this.adviceCounter = adviceCounter;
     }
+    public String toString(){
+      return ("this.sender: "+this.sender+" "+"this.holder: "+this.holder+" "+"this.asked: "+this.asked+" "+"this.inRequestQueue: "+this.inRequestQueue+" "+"this.adviceCounter: "+this.adviceCounter);
+    }
   }
   
   private void onImposeHolder(ImposeHolder msg) {
@@ -160,7 +163,7 @@ public class TBDMXNode extends AbstractActor {
   }
 
   private void onRequestCS(RequestCS msg) {
-    log("Node "+this.id+"("+this.holder+"): requesting CS");
+    log("Node "+this.id+"(holder: "+this.holder+"): requesting CS");
     this.time = msg.time;
     if (!this.crashed && !this.recovering){
       if (!this.requestQueue.isEmpty()) {
@@ -202,7 +205,7 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onRequest(Request msg) {
-    log("Node "+this.id+"("+this.using+","+this.asked+"): received request from "+getSender());
+    log("Node "+this.id+"(using: "+this.using+", asked: "+this.asked+"): received request from "+getSender());
     if (!this.crashed && !this.recovering){
       addToRequestQueue(getSender());
       if (!this.using && !this.asked){
@@ -218,7 +221,7 @@ public class TBDMXNode extends AbstractActor {
     } 
     else if (this.recovering){
       log("Node "+this.id+": recovery request enqueued");
-      while (!this.recoveryQueue.offer(getSender())); //assures to push on queue without exceptions
+      while (!this.recoveryQueue.offer(getSender())); //ensures to push on queue without exceptions
       log("Node "+this.id+": recoveryQueue is now "+this.recoveryQueue);
     }
   }
@@ -237,8 +240,8 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onRestart(Restart msg) {
-    this.adviceCounter++;
-    getSender().tell(
+    this.adviceCounter++;                         //Keep a counter to count the number of time I sent an advice to be sure not to go into starvation
+    getSender().tell(                             //Send back an Advice message to whom asked for.
       new Advice(
         getSelf(),
         this.holderNode==getSender(),
@@ -251,57 +254,59 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onAdvice(Advice msg) {
-    log("Node "+this.id+" received advice from node: "+getSender());
-    this.receivedAdvices.add(msg);
-    if (receivedAdvices.size() == this.neighbors.size()) {
-      this.receivedAdvices.sort((Advice a1,Advice a2)->a1.adviceCounter-a2.adviceCounter);
-      for (Advice ad : receivedAdvices) {
+    log("Node "+this.id+" received advice from node: "+getSender()+" containing: "+msg.toString());
+    this.receivedAdvices.add(msg);                                                          //Add all Advice messages to a queue
+    if (receivedAdvices.size() == this.neighbors.size()) {                                  //When full start analyzes. For sure it will become full since no package can be lost.
+      this.receivedAdvices.sort((Advice a1,Advice a2)->a1.adviceCounter-a2.adviceCounter);  //Sort all messages for the adviceCounter in order not to starve any node.
+      for (Advice ad : receivedAdvices) {                                                   //For all the messages in the list
         System.out.println("Advice: "+ad.sender);
-        if (ad.asked) {
+        if (ad.asked) {                                                                     //If it requsted me the token, then I add it to the queue.
           requestQueue.add(ad.sender);
         }
 
-        this.holder &= ad.holder;
+        this.holder &= ad.holder;                                                           //If all the nodes say that I'm the holder, then I'm the holder, otherwise someone else is
         if (!ad.holder) {
           log("Holder found again!");
-          this.holderNode = ad.sender;
-          this.asked = ad.inRequestQueue;
+          this.holderNode = ad.sender;                                                      //Set the holder to that node
+          this.asked = ad.inRequestQueue;                                                   //Set asked to true if I've made a request, that is I'm in its requestQueue
         }
       }
       this.receivedAdvices.clear();
       
-      if (this.recoveryHolder) {
+      if (this.recoveryHolder) {                                                            //If while I was crashed I received a Privilege message, then I'm the holder.
         this.adviceCounter = 0;
         log("Node "+this.id+": (recovery) access granted ");
         this.holder = true;
         this.asked = false;
       }
-      while (!this.recoveryQueue.isEmpty()){
+      while (!this.recoveryQueue.isEmpty()){                                                //If a received Request messages while I was recovering, then I add them at the end of the queue I created before hand
         this.requestQueue.add(this.recoveryQueue.remove());
       }
       
-      if (this.holder){
+      if (this.holder){                                                                     //Finally, if I'm the holder, then I can serve the queue if it is not empty
         if (!this.requestQueue.isEmpty()){
           serveQueue();
           this.asked = false;
         }
       } 
-      else if (!this.asked) {
+      else if (!this.asked) {                                                               //Else I can send a Request message to my holderNode.
         this.asked = true;
         this.holderNode.tell(new Request(),getSelf());
       }
       this.recovering = false;
     }
+    log("After crashing "+String.valueOf(this.requestQueue));
   }
 
   private void onCrash(Crash msg) {
     log("Node "+this.id+" crashed.");
-    if (!this.crashed){
-      this.crashed = true;
-      this.requestQueue.clear();
-      this.holder = true;
-      this.asked = false;
-      this.holderNode = null;
+    if (!this.crashed){                                                     //If I receive the crashed command, and my status is not crashed, then
+      log("Before crashing "+String.valueOf(this.requestQueue));
+      this.crashed = true;                                                  //Set my status to crashed
+      this.requestQueue.clear();                                            //Clear the queue of requests
+      this.holder = true;                                                   //I set optimistically the holder to my self, works best with the recovery phase
+      this.asked = false;                                                   //I assume I've never asked
+      this.holderNode = null;                                               //There is no holder since I assume it's me.
     }
     else {
       log("Node "+this.id+": node is already down!");
@@ -310,12 +315,12 @@ public class TBDMXNode extends AbstractActor {
 
   private void onRecovery(Recovery msg) {
     log("Node "+this.id+" recovering.");
-    if (this.crashed){
-      for (ActorRef node : neighbors) {
-        node.tell(new Restart(), this.getSelf());
+    if (this.crashed){ //If it crashed
+      for (ActorRef node : neighbors) { //For all its neighbors
+        node.tell(new Restart(), this.getSelf()); //It asks for infos
       }
-      this.crashed = false;
-      this.recovering = true;
+      this.crashed = false; //After sending the message it is not in the crashed phase anymore
+      this.recovering = true; //But it starts to recover.
     } 
     else {
       log("Node "+this.id+": node is up and runnning, nothing to recover!");
@@ -351,3 +356,4 @@ public class TBDMXNode extends AbstractActor {
       .build();
   }
 }
+
