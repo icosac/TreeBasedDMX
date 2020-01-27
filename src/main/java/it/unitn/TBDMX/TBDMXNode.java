@@ -234,7 +234,7 @@ public class TBDMXNode extends AbstractActor {
       this.asked = false;
       serveQueue();
     }
-    else {
+    else if (this.recovering){
       this.recoveryHolder = true;
     }
   }
@@ -266,10 +266,11 @@ public class TBDMXNode extends AbstractActor {
 
         this.holder &= ad.holder;                                                           //If all the nodes say that I'm the holder, then I'm the holder, otherwise someone else is
         if (!ad.holder) {
-          log("Holder found again!");
           this.holderNode = ad.sender;                                                      //Set the holder to that node
           this.asked = ad.inRequestQueue;                                                   //Set asked to true if I've made a request, that is I'm in its requestQueue
+          log("Holder found again! "+ad.sender+" inrequestQueue: "+ad.inRequestQueue);
         }
+        log("Node "+this.id+": During recovery: "+this.holder);
       }
       this.receivedAdvices.clear();
       
@@ -289,7 +290,7 @@ public class TBDMXNode extends AbstractActor {
           this.asked = false;
         }
       } 
-      else if (!this.asked) {                                                               //Else I can send a Request message to my holderNode.
+      else if (!this.asked && !this.requestQueue.isEmpty()) {                                                               //Else I can send a Request message to my holderNode.
         this.asked = true;
         this.holderNode.tell(new Request(),getSelf());
       }
