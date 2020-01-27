@@ -1,17 +1,18 @@
 package it.unitn.TBDMX;
 import akka.actor.ActorRef;
 import akka.actor.ActorSystem;
+import scala.Array;
 import scala.concurrent.duration.Duration;
 
+import java.io.*;
 import java.lang.Thread;
+import java.util.LinkedList;
 import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.io.IOException;
-import java.io.BufferedReader;
-import java.io.FileReader;
-import java.io.FileNotFoundException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import it.unitn.TBDMX.TBDMXNode.ImposeHolder;
 import it.unitn.TBDMX.TBDMXNode.RequestCS;
@@ -28,25 +29,52 @@ import it.unitn.TBDMX.TBDMXNode.Crash;
 public class TBDMXController {
   static int N_nodes;
 
+  private static void readFromFile(List<ArrayList<Integer>> neighbors){
+    BufferedReader br=null;
+    String st;
+    try {
+      br = new BufferedReader(new FileReader(new File("tree.conf")));
+    }
+    catch (Exception e) {System.err.println("Tree file not found!"); System.exit(-2);}
+    try {
+      st = br.readLine();
+      if (Pattern.compile(".*xml.*").matcher(st).find()) {
+        Pattern pattNode = Pattern.compile(".*node.*mainText=\"([0-9]+)\".*");
+        Pattern pattEdge = Pattern.compile(".*vertex1=\"([0-9]+)\".*vertex2=\"([0-9]+)\".*");
+        List<Integer> nodes = new ArrayList<>();
+        while ((st = br.readLine()) != null) {
+          Matcher m = pattNode.matcher(st);
+          if (m.find()) {
+            nodes.add(Integer.parseInt(m.group(1)));
+            neighbors.add(new ArrayList<>());
+          } else {
+            m = pattEdge.matcher(st);
+            if (m.find()) {
+              neighbors.get(Integer.parseInt(m.group(1))).add(Integer.parseInt(m.group(2)));
+              neighbors.get(Integer.parseInt(m.group(2))).add(Integer.parseInt(m.group(1)));
+            }
+          }
+        }
+      } else {
+        do {
+          ArrayList<Integer> nodeNeighborsIds = new ArrayList<>();
+          for (String nId : st.split(" ", 0)) {
+            nodeNeighborsIds.add(Integer.parseInt(nId));
+          }
+          neighbors.add(nodeNeighborsIds);
+        } while ((st = br.readLine()) != null);
+      }
+    }
+    catch(IOException e) {System.err.println("Error reading tree file!"); System.exit(-2);}
+  }
+
   public static void main(String[] args) {
     // Create the actor system
     final ActorSystem system = ActorSystem.create("TBDMX");
 
     // Parse tree structure
     List<ArrayList<Integer>> neighborsIds = new ArrayList<>();
-    BufferedReader treebr = null;
-    try { treebr = new BufferedReader(new FileReader("tree.conf")); }
-    catch (FileNotFoundException e) {System.err.println("Tree file not found!"); System.exit(-2);}
-    String st;
-    try {
-      while ((st = treebr.readLine()) != null) {
-        ArrayList<Integer> nodeNeighborsIds = new ArrayList<>();
-        for (String nId : st.split(" ",0)) {
-          nodeNeighborsIds.add(Integer.parseInt(nId));
-        }
-        neighborsIds.add(nodeNeighborsIds);
-      }
-    } catch(IOException e) {System.err.println("Error reading tree file!"); System.exit(-2);}
+    readFromFile(neighborsIds);
     N_nodes = neighborsIds.size();
 
     // Create all nodes of the system
@@ -69,8 +97,8 @@ public class TBDMXController {
       group.get(i).tell(neighMessage, null);
     }
 
-
     BufferedReader commandsbr = null;
+    String st;
     try { commandsbr = new BufferedReader(new FileReader("commands.conf")); }
     catch (FileNotFoundException e) {System.err.println("Command file not found!"); System.exit(-2);}
     try {
@@ -84,9 +112,9 @@ public class TBDMXController {
         }
         else {
           ArrayList<String> command = new ArrayList<> (Arrays.asList(st.split(" ",0)));
-          System.out.println("$ "+st);
+//          System.out.println("$ "+st);
           if (command.get(0).equals("request")) {
-            group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);            
+            group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);
           }
           else if (command.get(0).equals("crash")) {
             group.get(Integer.parseInt(command.get(1))).tell(new Crash(), null);
