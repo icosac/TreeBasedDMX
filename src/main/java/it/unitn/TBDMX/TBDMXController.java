@@ -29,6 +29,15 @@ import it.unitn.TBDMX.TBDMXNode.Crash;
 public class TBDMXController {
   static int N_nodes;
 
+  /**
+   * Function that reads the structure of the tree from `tree.conf`. There are two possible configurations:
+   * 1. The n-th line contains the neighbors for the n-th node separated by a space.
+   * 2. An xml file that contains a list (`<nodes>`) of `<node>`s and a list (`<edges>`) of `<edge>`s that is connections between one node and another.
+   * No flag needs to be set since it checks at the beginning of the file the presence of an xml tag. If no tag is found, then it assumes that lists of neighbors will be used, otherwise the xml file.
+   * The only requirement is that in case of using the xml file, it need to be well formatted, that is one node per line and one edge per line.
+   *
+   * @param      neighbors  The neighbors to then be passed to the `ActoRef`s.
+   */
   private static void readFromFile(List<ArrayList<Integer>> neighbors){
     BufferedReader br=null;
     String st;
@@ -97,6 +106,7 @@ public class TBDMXController {
       group.get(i).tell(neighMessage, null);
     }
 
+    //Read commands from file commands.conf
     BufferedReader commandsbr = null;
     String st;
     try { commandsbr = new BufferedReader(new FileReader("commands.conf")); }
@@ -112,7 +122,6 @@ public class TBDMXController {
         }
         else {
           ArrayList<String> command = new ArrayList<> (Arrays.asList(st.split(" ",0)));
-//          System.out.println("$ "+st);
           if (command.get(0).equals("request")) {
             group.get(Integer.parseInt(command.get(1))).tell(new RequestCS(Integer.parseInt(command.get(2))), null);
           }

@@ -46,7 +46,7 @@ public class TBDMXNode extends AbstractActor {
       this.logger = new BufferedWriter(new FileWriter("logs/node"+id+".log"));
     }
     catch (IOException e){
-      System.err.println("Node "+this.id+": cannot initialize log!");
+      System.err.println("Node "+this.id+": cannot initialize log! Probably missing directory `logs`");
     }
     log("Node "+id+" up.");
   }
@@ -56,7 +56,11 @@ public class TBDMXNode extends AbstractActor {
   }
 
   /*-- Auxiliary functions--------------------------------------------------- */
-
+  /**
+   * Writes a string of log both in the log file of the node and on the console.
+   *
+   * @param      s     The string to be logged.
+   */
   private void log(String s){
     try {
       this.logger.write(s+"\n");
@@ -67,6 +71,10 @@ public class TBDMXNode extends AbstractActor {
     System.out.println(s);
   }
 
+  /**
+   * Function that simulates a critical section. 
+   * The thread just goes to sleep for a certain period of time. 
+   */
   private void criticalSection(){
     this.using = true;
     log("Entering CS @ node "+this.id);
@@ -76,9 +84,16 @@ public class TBDMXNode extends AbstractActor {
     this.using = false;
   }
 
+  /**
+   * Function to add a node to a `reqeustQueue`.
+   * It first checks whether the node to be added is already inside the queue.
+   * This method uses the `offer` function which ensures to push on queue without exceptions
+   *
+   * @param      node  The node to be added to the queue
+   */
   private void addToRequestQueue(ActorRef node) {
     if (!this.requestQueue.contains(node)){
-      while (!this.requestQueue.offer(node)); //assures to push on queue without exceptions
+      while (!this.requestQueue.offer(node));
       log("Node "+this.id+": Queue is now "+this.requestQueue);
     }
     else {
@@ -87,6 +102,14 @@ public class TBDMXNode extends AbstractActor {
 
   }
 
+  /**
+   * A method to serve the next element in a non-empty queue. 
+   * If the next element to be served is the node itself, then it enters the critical section. 
+   * Once exited the CS, if the queue is not empty, being the possessor of the token, the node calls again the method. 
+   * If instead it is one of the neighbors, a `Privilege` message is sent. 
+   * Moreover if the queue is not empty after having served the neighbor, a `Request` message is "piggybacks" 
+   * in order to obtain the token again and serve the next element in the queue.
+   */
   private void serveQueue() {
     if (!this.requestQueue.isEmpty()){
       ActorRef head = this.requestQueue.remove();
@@ -154,6 +177,12 @@ public class TBDMXNode extends AbstractActor {
     }
   }
   
+  /**
+   * Function called upon receipt of an `ImposeHolder` message.
+   * It sends a `BroadcastHolder` to all its neighbors. 
+   *
+   * @param      msg   The message indicating that the node is the initial holder.
+   */
   private void onImposeHolder(ImposeHolder msg) {
     this.holder = true;
     for (ActorRef node : neighbors) {
@@ -164,10 +193,24 @@ public class TBDMXNode extends AbstractActor {
     }
   }
   
+  /**
+   * Upon receiving a `SetNeighbors` message, the node sets its neighbors to the same value as the one in the message.
+   *
+   * @param      msg   The message containing the neighbors to be set.
+   */
   private void onSetNeighbors(SetNeighbors msg) {
     this.neighbors = msg.group;
   }
 
+  /**
+   * Called on 'RequestCS' which is sent from the controller indicating that the node should enter the critical section.
+   * If the node is not crashed nor recovering, then it checks whether its `requestQueue` is empty or not. If it is not, then it adds itself to the queue.
+   * If instead the queue is empty, then it checks whether it is the holder of the token. If it is, then it enters the critical section.
+   * If it is not the holder, then it adds itself to the queue and sets `asked` to `true` in order to remember having sent a request.
+   * If the node is recovering while receiving the request, it adds such request to a secondary queue, `recoveryQueue` which will be merged with `serveQueue` later.
+   *
+   * @param      msg   The message containing how much time the node should stay inside the CS.
+   */
   private void onRequestCS(RequestCS msg) {
     log("Node "+this.id+"(holder: "+this.holder+"): requesting CS");
     this.time = msg.time;
@@ -193,11 +236,18 @@ public class TBDMXNode extends AbstractActor {
     }
     else if (this.recovering){
       log("Node "+this.id+": recovery requestCS enqueued");
-      while (!this.recoveryQueue.offer(getSelf())); //assures to push on queue without exceptions
+      while (!this.recoveryQueue.offer(getSelf())); //ensures to push on queue without exceptions
       log("Node "+this.id+": recoveryQueue is now "+this.recoveryQueue);     
     }
   }
   
+  /**
+   * Called upon receiving a `BroadcastHolder` message. The node receiving the message will set it's `holderNode` to the sender of the message, 
+   * and the `holder` flag to `false` since it is not the holder.
+   * Then it sends a new a `BroadcastHolder` to each neighbor, except the sender of the previous `BroadcastHolder`. 
+   *
+   * @param      msg   The message indicating to store and broadcast information on the holder.
+   */
   private void onBroadcastHolder(BroadcastHolder msg) {
     this.holder = false;
     this.holderNode = getSender();
@@ -210,6 +260,13 @@ public class TBDMXNode extends AbstractActor {
     }  
   }
   
+  /**
+   * Upon receiving a `Request` message, if the node is not crashed nor recovering, then it adds the request to the queue. 
+   * It then checks whether it is not in the critical section nor it has already asked for the token, and if it is the holder, it then serves the queue. 
+   * If the node added to the queue is the only node in the queue, then no Request can have been sent before to request the token, hence one should be sent.
+   *
+   * @param      msg   A message requiring the token.
+   */
   private void onRequest(Request msg) {
     log("Node "+this.id+"(using: "+this.using+", asked: "+this.asked+"): received request from "+getSender());
     if (!this.crashed && !this.recovering){
@@ -232,6 +289,13 @@ public class TBDMXNode extends AbstractActor {
     }
   }
   
+  /**
+   * Called on the `Privilege` message receipt. If the node is not crashed nor is recovering, then it received the token correctly and can serve the next element in the queue.
+   * At this moment it also reset the counter `adviceCounter` since it got the token and is not risking starvation anymore.
+   * If instead the node is recovering, then the flag `recoveryHolder` is set, which indicates that during the recovery a `Privilege` message was received, but the queue could not be served. 
+   *
+   * @param      msg   The message (virtually) bringing the token.
+   */
   private void onPrivilege(Privilege msg) {
     if (!this.crashed){
       this.adviceCounter = 0;
@@ -246,9 +310,19 @@ public class TBDMXNode extends AbstractActor {
     }
   }
   
+  /**
+   * Upon receiving a `Restart` message, the receiver sends an `Advice` message to the sender of the `Restart` which had crashed.
+   * In particular, the `Advice` message, will tell the crashed node:
+   * if it was the holder wrt to the actual node;
+   * if the actual node made any request to satisfy any previous request;
+   * if the actual node contains the crashed node in its queue;
+   * A counter that allows avoiding starvation of the node.
+   *
+   * @param      msg   The `Restart` message indicating a crashed node and the need for information.
+   */
   private void onRestart(Restart msg) {
-    this.adviceCounter++;                         //Keep a counter to count the number of time I sent an advice to be sure not to go into starvation
-    getSender().tell(                             //Send back an Advice message to whom asked for.
+    this.adviceCounter++;                         
+    getSender().tell(                             
       new Advice(
         getSelf(),
         this.holderNode==getSender(),
@@ -260,6 +334,19 @@ public class TBDMXNode extends AbstractActor {
     );
   }
   
+  /**
+   * Upon receiving an `Advice` message, the node stores such message. When it received an `Advice` from each neighbor, then it can start the recover the information it had before crashing.
+   * First of all the messages are sort by `adviceCounter` to avoid starvation. Then, if 
+   * - All `Advice`s indicate that the crashed node was the holder, then it is the holder of the token.
+   * - One of the nodes states that the crashed node was not the holder, then it was not, but the first node is the `holderNode` for the crashed one.
+   * - One of the nodes states that the crashed nose was the `holderNode` wrt to it, and it made a request to the crashed node, then such node should be added to the requestQueue.
+   *  Then the node checks whether something happened during its recovery phase. If the `recoveryHolder` the crashed node is the holder of the token. If the `recoveryQueue` is not empty,
+   *  then some requests have arrived before recovering completely and they should be added to the `requestQueue`. 
+   *  At last if the node is now the holder, then it can proceed to serve the next node in the queue. If instead it is not the holder and its queue is not empty and it hasn't make any request yet, 
+   *  it will send a `Request` to its holder.
+   *
+   * @param      msg   The message containing information about the node before the crash.
+   */
   private void onAdvice(Advice msg) {
     log("Node "+this.id+" received advice from node: "+getSender()+" containing: "+msg.toString());
     this.receivedAdvices.add(msg);                                                          //Add all Advice messages to a queue
@@ -267,7 +354,7 @@ public class TBDMXNode extends AbstractActor {
       this.receivedAdvices.sort((Advice a1,Advice a2)->a1.adviceCounter-a2.adviceCounter);  //Sort all messages for the adviceCounter in order not to starve any node.
       for (Advice ad : receivedAdvices) {                                                   //For all the messages in the list
         System.out.println("Advice: "+ad.sender);
-        if (ad.asked && ad.holder) {                                                                     //If it requsted me the token, then I add it to the queue.
+        if (ad.asked && ad.holder) {                                                        //If it requsted me the token, then I add it to the queue.
           requestQueue.add(ad.sender);
         }
 
@@ -282,7 +369,7 @@ public class TBDMXNode extends AbstractActor {
       this.receivedAdvices.clear();
       
       if (this.recoveryHolder) {                                                            //If while I was crashed I received a Privilege message, then I'm the holder.
-        this.adviceCounter = 0;
+        this.adviceCounter = 0;                                                             
         log("Node "+this.id+": (recovery) access granted ");
         this.holder = true;
         this.asked = false;
@@ -309,6 +396,12 @@ public class TBDMXNode extends AbstractActor {
     }
   }
 
+  /**
+   * Upon receiving a `Crash` message, if the node was not already crashed or recovering, then it crashes, which implies the lose of knowledge regarding the token and the request. 
+   * The list of neighbors is preserved.
+   *
+   * @param      msg   The message which dooms a node.
+   */
   private void onCrash(Crash msg) {
     log("Node "+this.id+" crashed.");
     if (!this.crashed && !this.recovering){                                 //If I receive the crashed command, and my status is not crashed, then
@@ -324,6 +417,12 @@ public class TBDMXNode extends AbstractActor {
     }
   }
 
+  /**
+   * Upon receipt of a `Recovery` message, if the token is still crashed, then it starts the recovery procedure, 
+   * which implies as a first step to send a `Restart` message to all the neighbors to gather information
+   *
+   * @param      msg   A message that tells to a crashed node to reboot.
+   */
   private void onRecovery(Recovery msg) {
     log("Node "+this.id+" recovering.");
     if (this.crashed){ //If it crashed
@@ -338,6 +437,11 @@ public class TBDMXNode extends AbstractActor {
     }
   }
 
+  /**
+   * When the controller sends such message to the nodes, it indicates that they need to close the buffer onto which they were writing their log.
+   *
+   * @param      msg   The message indicating to close the logs.
+   */
   private void onSaveLog(SaveLog msg){
     try {
       this.logger.close();
