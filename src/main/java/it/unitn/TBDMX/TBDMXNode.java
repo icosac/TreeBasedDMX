@@ -233,7 +233,7 @@ public class TBDMXNode extends AbstractActor {
   }
   
   private void onPrivilege(Privilege msg) {
-    if (!this.crashed){
+    if (!this.crashed && !this.recovering){
       this.adviceCounter = 0;
       log("Node "+this.id+": access granted by "+getSender());
       this.holderNode = getSelf();
