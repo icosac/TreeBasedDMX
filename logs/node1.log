@@ -1,0 +1,21 @@
+Node 1 up.
+Node 1: holderNode is Actor[akka://TBDMX/user/node0#-201192665]
+1: sending BroadcastHolder from Actor[akka://TBDMX/user/node1#-1540933344] to Actor[akka://TBDMX/user/node3#-449095420]
+1: sending BroadcastHolder from Actor[akka://TBDMX/user/node1#-1540933344] to Actor[akka://TBDMX/user/node4#144025579]
+Node 1(using: false, asked: false): received request from Actor[akka://TBDMX/user/node3#-449095420]
+Node 1: Queue is now [Actor[akka://TBDMX/user/node3#-449095420]]
+Node 1: access granted by Actor[akka://TBDMX/user/node0#-201192665]
+Node 1: serving Actor[akka://TBDMX/user/node3#-449095420]. Queue is now []
+Node 1(using: false, asked: false): received request from Actor[akka://TBDMX/user/node4#144025579]
+Node 1: Queue is now [Actor[akka://TBDMX/user/node4#144025579]]
+Node 1: access granted by Actor[akka://TBDMX/user/node3#-449095420]
+Node 1: serving Actor[akka://TBDMX/user/node4#144025579]. Queue is now []
+Node 1(holder: false): requesting CS
+Node 1: Queue is now [Actor[akka://TBDMX/user/node1#-1540933344]]
+Node 1: access granted by Actor[akka://TBDMX/user/node4#144025579]
+Node 1: serving Actor[akka://TBDMX/user/node1#-1540933344]. Queue is now []
+Entering CS @ node 1
+Exiting CS @ node 1
+Node 1(using: false, asked: false): received request from Actor[akka://TBDMX/user/node0#-201192665]
+Node 1: Queue is now [Actor[akka://TBDMX/user/node0#-201192665]]
+Node 1: serving Actor[akka://TBDMX/user/node0#-201192665]. Queue is now []
