@@ -1,8 +1,0 @@
-Node 2 up.
-Node 2: holderNode is Actor[akka://TBDMX/user/node0#-201192665]
-Node 2(holder: false): requesting CS
-Node 2: Queue is now [Actor[akka://TBDMX/user/node2#45666940]]
-Node 2: access granted by Actor[akka://TBDMX/user/node0#-201192665]
-Node 2: serving Actor[akka://TBDMX/user/node2#45666940]. Queue is now []
-Entering CS @ node 2
-Exiting CS @ node 2
